@@ -6,9 +6,10 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Xml;
+using System.Threading.Tasks;
 
 using static ImageSimilarity.ImageOperations;
-using System.Security.Cryptography;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.ProgressBar;
 
 namespace ImageSimilarity
 {
@@ -36,16 +37,6 @@ namespace ImageSimilarity
         public string MatchedImgPath;
         public double MatchScore;
     }
-    struct QueryImageStats
-    {
-        public bool isCalculated;
-        public double[] qredProbDist;
-        public double[] qgreenProbDist;
-        public double[] qblueProbDist;
-        public double normRed2;
-        public double normGreen2;
-        public double normBlue2;
-    }
     public class ImageHistSimilarity
     {
         /// <summary>
@@ -55,7 +46,6 @@ namespace ImageSimilarity
         /// <returns>Calculated stats of the given image</returns>
         public static ImageInfo CalculateImageStats(string imgPath)
         {
-
             RGBPixel[,] imageMatrix = OpenImage(imgPath);
             int height = imageMatrix.GetLength(0);
             int width = imageMatrix.GetLength(1);
@@ -63,6 +53,8 @@ namespace ImageSimilarity
             int redMax = -1, greenMax = -1, blueMax = -1;
             int redMin = int.MaxValue, greenMin = int.MaxValue, blueMin = int.MaxValue;
             int totalPixels = height * width;
+            double invTotalPixels = (double) 1.0 / totalPixels;
+
             ChannelStats redStats = new ChannelStats { Hist = new int[256] };
             ChannelStats greenStats = new ChannelStats { Hist = new int[256] };
             ChannelStats blueStats = new ChannelStats { Hist = new int[256] };
@@ -80,8 +72,6 @@ namespace ImageSimilarity
             {
                 for (int j = 0; j < width; ++j)
                 {
-
-                    // look up ref var
                     int r = imageMatrix[i, j].red;
                     int g = imageMatrix[i, j].green;
                     int b = imageMatrix[i, j].blue;
@@ -106,39 +96,63 @@ namespace ImageSimilarity
             }
             redStats.Max = redMax; greenStats.Max = greenMax; blueStats.Max = blueMax;
             redStats.Min = redMin; greenStats.Min = greenMin; blueStats.Min = blueMin;
+            redStats.Mean = (double)redSum * invTotalPixels;
+            greenStats.Mean = (double)greenSum * invTotalPixels;
+            blueStats.Mean = (double)blueSum * invTotalPixels;
+            int cumulativeRedFreq = 0; int cumulativeGreenFreq = 0; int cumlativeBlueFreq = 0;
+            int medianPos = (totalPixels + 1) / 2;
+            double sumRedSqs = 0.0; double sumGreenSqs = 0.0; double sumBlueSqs = 0;
+            double redDiff; double greenDiff; double blueDiff;
+            for(int i = 0; i < 256; ++i)
+            {
+                int redCount = redStats.Hist[i];
+                int greenCount = greenStats.Hist[i];
+                int blueCount = blueStats.Hist[i];
+                cumlativeBlueFreq += blueCount;
+                cumulativeRedFreq += redCount;
+                cumulativeGreenFreq += greenCount;
 
-            ComputeChannelStats(ref redStats, redSum, totalPixels);
-            ComputeChannelStats(ref greenStats, greenSum, totalPixels);
-            ComputeChannelStats(ref blueStats, blueSum, totalPixels);
+                if (cumulativeRedFreq >= medianPos && redStats.Med == 0)
+                {
+                    redStats.Med = i;
+                }
+                if (cumlativeBlueFreq >= medianPos && blueStats.Med == 0)
+                {
+                    blueStats.Med = i;
+                }
 
+                if (cumulativeGreenFreq >= medianPos && greenStats.Med == 0)
+                {
+                    greenStats.Med = i;
+                }
+
+                if (redCount > 0)
+                {
+                    redDiff = i - redStats.Mean;
+                    sumRedSqs += redCount * redDiff * redDiff;
+
+                }
+
+                if (blueCount > 0)
+                {
+                    blueDiff = i - blueStats.Mean;
+                    sumBlueSqs += blueCount * blueDiff * blueDiff;
+
+                }
+
+                if (greenCount > 0)
+                {
+                    greenDiff = i - greenStats.Mean;
+                    sumGreenSqs += greenCount * greenDiff * greenDiff;
+
+                }
+            }
+            redStats.StdDev = Math.Sqrt(sumRedSqs * invTotalPixels);
+            blueStats.StdDev = Math.Sqrt(sumBlueSqs * invTotalPixels);
+            greenStats.StdDev = Math.Sqrt(sumGreenSqs * invTotalPixels);
 
             return imageInfo;
         }
-        private static void ComputeChannelStats(ref ChannelStats channelStats, int sum, int totalPixels)
-        {
-            channelStats.Mean = (double)sum / totalPixels;
-
-
-            int medianPos = (totalPixels + 1) / 2;
-            int cumulativeFreq = 0;
-            double sumSquares = 0.0;
-
-            for (int i = 0; i < 256; ++i)
-            {
-                cumulativeFreq += channelStats.Hist[i];
-                int count = channelStats.Hist[i];
-
-                if (cumulativeFreq >= medianPos && channelStats.Med == 0)
-                {
-                    channelStats.Med = i;
-                }
-                if (count == 0) continue;
-                double diff = i - channelStats.Mean;
-                sumSquares += count * diff * diff;
-            }
-            channelStats.StdDev = Math.Sqrt(sumSquares / totalPixels);
-        }
-
 
         /// <summary>
         /// Load all target images and calculate their stats
@@ -153,7 +167,6 @@ namespace ImageSimilarity
             {
                 MaxDegreeOfParallelism = Environment.ProcessorCount
             };
-            Console.WriteLine(Environment.ProcessorCount);
 
             Parallel.For(0, targetPaths.Length, options, i =>
             {
@@ -174,32 +187,30 @@ namespace ImageSimilarity
         {
             ImageInfo queryImg = CalculateImageStats(queryPath);
             MatchInfo[] matchInfos = new MatchInfo[targetImgStats.Length];
-            QueryImageStats qStats = new QueryImageStats
-            {
-                qblueProbDist = new double[256],
-                qredProbDist = new double[256],
-                qgreenProbDist = new double[256],
-            };
+            //calculate cosine distance here
             for (int i = 0; i < targetImgStats.Length; ++i)
             {
-                double result = calculateCosineDistance(ref targetImgStats[i], ref queryImg,ref qStats);
+                double result = calculateCosineDistance(ref targetImgStats[i], ref queryImg);
                 matchInfos[i] = new MatchInfo
                 {
                     MatchedImgPath = targetImgStats[i].Path,
                     MatchScore = result,
                 };
-                if(i ==  numOfTopMatches-1)
-                    Array.Sort(matchInfos, (p1, p2) => p1.MatchScore.CompareTo(p2.MatchScore));
             }
+            Array.Sort(matchInfos, (p1, p2) => p1.MatchScore.CompareTo(p2.MatchScore));
+            MatchInfo[] topMatches = new MatchInfo[numOfTopMatches];
+            Array.Copy(matchInfos, topMatches, numOfTopMatches);
 
-            return matchInfos.Take(numOfTopMatches).ToArray();
+            return topMatches;
         }
 
-        private static double calculateCosineDistance(ref ImageInfo imageInfos, ref ImageInfo queryImage, ref QueryImageStats qStats)
+        private static double calculateCosineDistance(ref ImageInfo imageInfos, ref ImageInfo queryImage)
         {
+            //qprobdist can be calculated once. instead of everytime FIX THIS 
             int height = imageInfos.Height;
             int width = imageInfos.Width;
-
+            int qheight = queryImage.Height;
+            int qwidth = queryImage.Width;
             double redDist = 0;
             double greenDist = 0;
             double blueDist = 0;
@@ -209,35 +220,31 @@ namespace ImageSimilarity
             double normGreen1 = 0;
             double blueSum = 0;
             double normBlue1 = 0;
-
+            double normRed2 = 0;
+            double normBlue2 = 0;
+            double normGreen2 = 0;
+            //potential optimization here
             for (int i = 0; i < 256; ++i)
             {
-                if (!qStats.isCalculated)
-                {
-                    int qheight = queryImage.Height;
-                    int qwidth = queryImage.Width;
-                    qStats.qredProbDist[i] = (double)queryImage.RedStats.Hist[i] / (qheight * qwidth);
-                    qStats.qgreenProbDist[i] = (double)queryImage.GreenStats.Hist[i] / (qheight * qwidth);
-                    qStats.qblueProbDist[i] = (double)queryImage.BlueStats.Hist[i] / (qheight * qwidth);
-
-                    qStats.normRed2 += (qStats.qredProbDist[i] * qStats.qredProbDist[i]);
-                    qStats.normGreen2 += (qStats.qgreenProbDist[i] * qStats.qgreenProbDist[i]);
-                    qStats.normBlue2 += (qStats.qblueProbDist[i] * qStats.qblueProbDist[i]);
-                    if (i == 255) qStats.isCalculated = true;
-                }
                 double redProbDist = (double)imageInfos.RedStats.Hist[i] / (height * width);
                 double greenProbDist = (double)imageInfos.GreenStats.Hist[i] / (height * width);
                 double blueProbDist = (double)imageInfos.BlueStats.Hist[i] / (height * width);
-                redSum += (redProbDist * qStats.qredProbDist[i]);
-                greenSum += (greenProbDist * qStats.qgreenProbDist[i]);
-                blueSum += (blueProbDist * qStats.qblueProbDist[i]);
+                double qredProbDist = (double)queryImage.RedStats.Hist[i] / (qheight * qwidth);
+                double qgreenProbDist = (double)queryImage.GreenStats.Hist[i] / (qheight * qwidth);
+                double qblueProbDist = (double)queryImage.BlueStats.Hist[i] / (qheight * qwidth);
+                redSum += (redProbDist * qredProbDist);
+                greenSum += (greenProbDist * qgreenProbDist);
+                blueSum += (blueProbDist * qblueProbDist);
                 normRed1 += (redProbDist * redProbDist);
                 normBlue1 += (blueProbDist * blueProbDist);
                 normGreen1 += (greenProbDist * greenProbDist);
+                normRed2 += (qredProbDist * qredProbDist);
+                normGreen2 += (qgreenProbDist * qgreenProbDist);
+                normBlue2 += (qblueProbDist * qblueProbDist);
             }
-            redDist = Math.Acos(redSum / Math.Sqrt(normRed1 * qStats.normRed2)) * (180.0 / Math.PI);
-            blueDist = Math.Acos(blueSum / Math.Sqrt(normBlue1 * qStats.normBlue2)) * (180.0 / Math.PI);
-            greenDist = Math.Acos(greenSum / Math.Sqrt(normGreen1 * qStats.normGreen2)) * (180.0 / Math.PI);
+            redDist = Math.Acos(redSum / Math.Sqrt(normRed1 * normRed2)) * (180.0 / Math.PI);
+            blueDist = Math.Acos(blueSum / Math.Sqrt(normBlue1 * normBlue2)) * (180.0 / Math.PI);
+            greenDist = Math.Acos(greenSum / Math.Sqrt(normGreen1 * normGreen2)) * (180.0 / Math.PI);
             return (redDist + blueDist + greenDist) / 3;
         }
     }
