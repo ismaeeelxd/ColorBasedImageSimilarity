@@ -1,3 +1,4 @@
+
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
@@ -9,6 +10,7 @@ using System.Reflection.Emit;
 using System.Text;
 using System.Windows.Forms;
 using System.Windows.Forms.DataVisualization.Charting;
+using ImageSimilarity;
 using static System.Net.Mime.MediaTypeNames;
 using static ImageSimilarity.ImageHistSimilarity;
 
@@ -22,6 +24,7 @@ namespace ImageSimilarity
         }
 
         #region Global Data
+        string targetFolderPath;
         ImageInfo[] allImgsInfo;
         string curImgPath;
         MatchInfo[] topMatches;
@@ -50,11 +53,10 @@ namespace ImageSimilarity
             {
                 try
                 {
-                    string folderPath;
                     Stopwatch sw = Stopwatch.StartNew();
                     {
-                        folderPath = folderBrowserDialog1.SelectedPath;
-                        List<string> files = GetAllImageFiles(folderPath);
+                        targetFolderPath = folderBrowserDialog1.SelectedPath;
+                        List<string> files = GetAllImageFiles(targetFolderPath);
                         string[] imgPaths = files.ToArray();
                         lstAllImgs.Items.AddRange(imgPaths);
                         allImgsInfo = LoadAllImages(imgPaths);
@@ -70,18 +72,18 @@ namespace ImageSimilarity
                     }
                     nudNumOfMatches.Maximum = allImgsInfo.Length;
 
-                    if (File.Exists(folderPath + "\\ImagesInfo.dat"))
+                    if (File.Exists(targetFolderPath + "\\ImagesInfo.dat"))
                     {
-                        Dictionary<string, ImageInfo> loadedImgsInfo = LoadImgsInfo(folderPath + "\\ImagesInfo.dat");
+                        Dictionary<string, ImageInfo> loadedImgsInfo = LoadImgsInfo(targetFolderPath + "\\ImagesInfo.dat");
                         int numOfWrong = CompareImgsInfo(allImgsInfo, loadedImgsInfo);
-                        if (numOfWrong > 0) 
+                        if (numOfWrong > 0)
                         {
                             MessageBox.Show("WRONG OUTPUT in " + numOfWrong + " Cases! check console for details");
                         }
                     }
                     else
                     {
-                        SaveImgsInfo(allImgsInfo, folderPath, "ImagesInfo.dat");
+                        SaveImgsInfo(allImgsInfo, targetFolderPath, "ImagesInfo.dat");
                     }
                 }
                 catch (Exception ex)
@@ -342,6 +344,9 @@ namespace ImageSimilarity
                 imageInfo.Path = sr.ReadString();
                 imageInfo.Width = sr.ReadInt32();
                 imageInfo.Height = sr.ReadInt32();
+
+                string fileName = imageInfo.Path.Substring(imageInfo.Path.LastIndexOf('\\'), imageInfo.Path.Length - imageInfo.Path.LastIndexOf('\\'));
+                imageInfo.Path = targetFolderPath + fileName;
                 //Hists
                 imageInfo.RedStats.Hist = new int[256];
                 imageInfo.GreenStats.Hist = new int[256];
@@ -367,6 +372,7 @@ namespace ImageSimilarity
                 imageInfo.GreenStats.StdDev = sr.ReadDouble();
 
                 imageInfo.BlueStats.Min = sr.ReadInt32();
+                
                 imageInfo.BlueStats.Max = sr.ReadInt32();
                 imageInfo.BlueStats.Med = sr.ReadInt32();
                 imageInfo.BlueStats.Mean = sr.ReadDouble();
@@ -374,7 +380,6 @@ namespace ImageSimilarity
 
                 imgsInfo.Add(imageInfo.Path, imageInfo);
             }
-
             s.Close();
             sr.Close();
 
@@ -401,7 +406,7 @@ namespace ImageSimilarity
                 //Red Stats
                 if (imgInf1.RedStats.Min != imgInf2.RedStats.Min)
                 {
-                    msg += $"Red Max Mismatch! Expected {imgInf1.RedStats.Min} Actual {imgInf2.RedStats.Min}\n";
+                    msg += $"Red Min Mismatch! Expected {imgInf1.RedStats.Min} Actual {imgInf2.RedStats.Min}\n";
                     correct = false;
                 }
                 if (imgInf1.RedStats.Max != imgInf2.RedStats.Max)
@@ -539,9 +544,13 @@ namespace ImageSimilarity
 
             for (int m = 0; m < numOfMatches; m++)
             {
-                MatchInfo matchInfo = new  MatchInfo();
-                matchInfo.MatchedImgPath = sr.ReadString();
+                MatchInfo matchInfo = new MatchInfo();
+                string savedPath = sr.ReadString();
                 matchInfo.MatchScore = sr.ReadDouble();
+
+                string fileName = savedPath.Substring(savedPath.LastIndexOf('\\'), savedPath.Length - savedPath.LastIndexOf('\\'));
+                matchInfo.MatchedImgPath = targetFolderPath + fileName;
+
                 matchesInfo.Add(matchInfo.MatchedImgPath, matchInfo);
             }
 

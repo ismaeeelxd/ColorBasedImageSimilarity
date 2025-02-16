@@ -9,7 +9,6 @@ using System.Xml;
 using System.Threading.Tasks;
 
 using static ImageSimilarity.ImageOperations;
-using static System.Windows.Forms.VisualStyles.VisualStyleElement.ProgressBar;
 
 namespace ImageSimilarity
 {
@@ -49,24 +48,15 @@ namespace ImageSimilarity
             RGBPixel[,] imageMatrix = OpenImage(imgPath);
             int height = imageMatrix.GetLength(0);
             int width = imageMatrix.GetLength(1);
-            int redSum = 0, greenSum = 0, blueSum = 0;
+            double redSum = 0.0, greenSum = 0.0, blueSum = 0.0;
             int redMax = -1, greenMax = -1, blueMax = -1;
-            int redMin = int.MaxValue, greenMin = int.MaxValue, blueMin = int.MaxValue;
-            int totalPixels = height * width;
-            double invTotalPixels = (double) 1.0 / totalPixels;
+            int redMin = 256, greenMin = 256, blueMin = 256;
+            double totalPixels = height * width;
+            double invTotalPixels = 1.0 / totalPixels;
 
             ChannelStats redStats = new ChannelStats { Hist = new int[256] };
             ChannelStats greenStats = new ChannelStats { Hist = new int[256] };
             ChannelStats blueStats = new ChannelStats { Hist = new int[256] };
-            ImageInfo imageInfo = new ImageInfo
-            {
-                Height = height,
-                Width = width,
-                Path = imgPath,
-                BlueStats = blueStats,
-                GreenStats = greenStats,
-                RedStats = redStats,
-            };
 
             for (int i = 0; i < height; ++i)
             {
@@ -96,14 +86,15 @@ namespace ImageSimilarity
             }
             redStats.Max = redMax; greenStats.Max = greenMax; blueStats.Max = blueMax;
             redStats.Min = redMin; greenStats.Min = greenMin; blueStats.Min = blueMin;
-            redStats.Mean = (double)redSum * invTotalPixels;
-            greenStats.Mean = (double)greenSum * invTotalPixels;
-            blueStats.Mean = (double)blueSum * invTotalPixels;
+            redStats.Mean = redSum * invTotalPixels;
+            greenStats.Mean = greenSum * invTotalPixels;
+            blueStats.Mean = blueSum * invTotalPixels;
             int cumulativeRedFreq = 0; int cumulativeGreenFreq = 0; int cumlativeBlueFreq = 0;
-            int medianPos = (totalPixels + 1) / 2;
+            int medianPos = (int)(totalPixels + 1) / 2;
             double sumRedSqs = 0.0; double sumGreenSqs = 0.0; double sumBlueSqs = 0;
             double redDiff; double greenDiff; double blueDiff;
-            for(int i = 0; i < 256; ++i)
+            redStats.Med = -1; blueStats.Med = -1; greenStats.Med = -1;
+            for (int i = 0; i < 256; ++i)
             {
                 int redCount = redStats.Hist[i];
                 int greenCount = greenStats.Hist[i];
@@ -112,16 +103,16 @@ namespace ImageSimilarity
                 cumulativeRedFreq += redCount;
                 cumulativeGreenFreq += greenCount;
 
-                if (cumulativeRedFreq >= medianPos && redStats.Med == 0)
+                if (cumulativeRedFreq >= medianPos && redStats.Med == -1)
                 {
                     redStats.Med = i;
                 }
-                if (cumlativeBlueFreq >= medianPos && blueStats.Med == 0)
+                if (cumlativeBlueFreq >= medianPos && blueStats.Med == -1)
                 {
                     blueStats.Med = i;
                 }
 
-                if (cumulativeGreenFreq >= medianPos && greenStats.Med == 0)
+                if (cumulativeGreenFreq >= medianPos && greenStats.Med == -1)
                 {
                     greenStats.Med = i;
                 }
@@ -144,15 +135,23 @@ namespace ImageSimilarity
                 {
                     greenDiff = i - greenStats.Mean;
                     sumGreenSqs += greenCount * greenDiff * greenDiff;
-
                 }
             }
             redStats.StdDev = Math.Sqrt(sumRedSqs * invTotalPixels);
             blueStats.StdDev = Math.Sqrt(sumBlueSqs * invTotalPixels);
             greenStats.StdDev = Math.Sqrt(sumGreenSqs * invTotalPixels);
 
-            return imageInfo;
+            return new ImageInfo
+            {
+                Height = height,
+                Width = width,
+                Path = imgPath,
+                BlueStats = blueStats,
+                GreenStats = greenStats,
+                RedStats = redStats,
+            };
         }
+
 
         /// <summary>
         /// Load all target images and calculate their stats
@@ -172,6 +171,8 @@ namespace ImageSimilarity
             {
                 imageInfos[i] = CalculateImageStats(targetPaths[i]);
             });
+
+            
 
             return imageInfos;
         }
@@ -211,9 +212,9 @@ namespace ImageSimilarity
             int width = imageInfos.Width;
             int qheight = queryImage.Height;
             int qwidth = queryImage.Width;
-            double redDist = 0;
-            double greenDist = 0;
-            double blueDist = 0;
+            double redDist;
+            double greenDist;
+            double blueDist;
             double redSum = 0;
             double normRed1 = 0;
             double greenSum = 0;
@@ -223,7 +224,6 @@ namespace ImageSimilarity
             double normRed2 = 0;
             double normBlue2 = 0;
             double normGreen2 = 0;
-            //potential optimization here
             for (int i = 0; i < 256; ++i)
             {
                 double redProbDist = (double)imageInfos.RedStats.Hist[i] / (height * width);
